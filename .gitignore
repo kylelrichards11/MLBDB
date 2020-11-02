@@ -1,0 +1,14 @@
+.DS_Store
+*/.DS_Store
+/venv/
+test.py
+out.txt
+/tests/
+__pycache__/
+*/__pycache__/
+*/dask-worker-space/
+MLBDB/statcast_data_old/
+MLBDB/statcast_data/2*
+temp.py
+temp.csv
+utils.py
