@@ -1,11 +1,14 @@
 from datetime import datetime
+import gc
 
 import dask.dataframe as dd
 from dask.distributed import Client, progress
 import numpy as np
 import pandas as pd
+import pandas
 
 from data import DataHandler
+import sys
 
 ########################################################################################################################
 ## FEATURE MAKER
@@ -14,7 +17,7 @@ class FeatureMaker():
     def __init__(self):
         self._dh = DataHandler()
 
-    def _create_event_order_col(self, df, col_name):
+    def _create_event_order_col(self, df, col_name, col_type):
         """ Creates a column that is the event order of the given DataFrame after sorting chronologically (by index)
         
         Parameters
@@ -22,14 +25,17 @@ class FeatureMaker():
         df (DataFrame) : the data to be sorted
 
         col_name (str) : the name of the new column
+        
+        col_type (str) : the type of the new column
 
         Returns
         -------
         DataFrame : the input DataFrame with the new column added
         """
         df = df.sort_index()
-        df[col_name] = np.arange(0, df.shape[0])
-        return df
+        order = pd.Series(np.arange(0, df.shape[0]).astype('int8'), name=col_name)
+        index = df["index"].reset_index(drop=True).astype('int')
+        return pd.concat((index, order), axis=1)
 
     def _days_between(self, date_1, date_2, max_gap=None):
         """ Calculates the number of days between the given dates. If the days are sequential, then there are 0 days in between. If the max is not None, then any number of days greater than the max is returned as the max
@@ -93,11 +99,11 @@ class FeatureMaker():
         #TODO: Finish function
     
     def pitch_count(self, data, player_type):
-        """ Calculates the number of previous pitches seen by each player for each pitch in the given outing and adds it as a feature
+        """ Calculates the number of previous pitches seen by each player in each game and adds it as a feature
 
         Parameters
         ----------
-        data (DataFrame) : the dataset to calculate the appearance gap for. There must be columns game_pk, pitcher or batter, at_bat_number, pitch_number
+        data (DataFrame) : the dataset to calculate the pitch count for. There must be columns game_pk, pitcher or batter
 
         player_type (str) : "pitcher" or "batter", the type of player to calculate the pitch count for
 
@@ -106,9 +112,11 @@ class FeatureMaker():
         DataFrame : the dataset with the feature pitch_count_pitcher or pitch_count_batter
         """
         assert(player_type == "pitcher" or player_type == "batter")
-    
-        meta = self._dh.get_data_types(df=data, extra_cols=[f"pitch_count_{player_type}"])
-        return data.groupby([player_type, "game_pk"]).apply(self._create_event_order_col, f"pitch_count_{player_type}", meta=meta)
+        meta = self._dh.get_data_types(extra_cols=["index", f"pitch_count_{player_type}"])
+        pitch_counts = data.groupby([player_type, "game_pk"]).apply(
+            self._create_event_order_col, f"pitch_count_{player_type}", "Int8", meta=meta
+        )
+        return data.merge(pitch_counts)
 
 if __name__ == "__main__":
     client = Client(n_workers=2, threads_per_worker=2, memory_limit='4GB')
@@ -117,11 +125,47 @@ if __name__ == "__main__":
     dh = DataHandler()
     fm = FeatureMaker()
 
-    data = dh.load_all_seasons()
+    columns = [
+        "at_bat_number",
+        "away_score",
+        "away_team",
+        "balls",
+        "bat_score",
+        "batter",
+        "bb_type",
+        "des",
+        "description",
+        "events",
+        "fld_score",
+        "game_date",
+        "game_pk",
+        "home_score",
+        "home_team",
+        "if_fielding_alignment",
+        "index",
+        "inning",
+        "inning_topbot",
+        "of_fielding_alignment",
+        "on_1b",
+        "on_2b",
+        "on_3b",
+        "outs_when_up",
+        "p_throws",
+        "pitch_name",
+        "pitch_number",
+        "pitch_type",
+        "pitcher",
+        "stand",
+        "strikes",
+        "type"
+    ]
+
+    data = dh.load_all_seasons(columns=columns, npartitions=8)
 
     data = fm.pitch_count(data, "pitcher")
-    # data = fm.pitch_count(data, "batter")
-    # data = fm.appearance_gap(data, "pitcher")
-    # data = fm.appearance_gap(data, "batter")
+    data = fm.pitch_count(data, "batter")
+    data = fm.appearance_gap(data, "pitcher")
+    data = fm.appearance_gap(data, "batter")
 
-    data = data.compute()
+    data = data.head(100)
+    print(data)

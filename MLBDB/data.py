@@ -103,7 +103,6 @@ class DataHandler():
             "woba_denom": "Int8",
             "woba_value": "float",
             "zone": "Int8",
-            "not_a_col": "str"
         }
 
     def get_data_types(self, df=None, extra_cols=[]):
@@ -122,38 +121,43 @@ class DataHandler():
         df_cols = [] if df is None else list(df.columns)
         return { key: self.data_types[key] for key in df_cols + extra_cols }
 
-    def load_all_seasons(self):
+    def load_all_seasons(self, columns=None, npartitions=8):
         """ Loads all of the seasons in the statcast_data folder
         
         Parameters
         ----------
-        None
+        columns (list, default=None) : columns to read. If None, all columns are read
+
+        npartitions(int, default=8) : the number of pandas DataFrames to split the Dask DataFrame into
 
         Returns
         -------
         DataFrame : the data from the statcast_data folder as one DataFrame
         """
-        datasets = [dask.delayed(feather.read_dataframe)(f"statcast_data/{year}") for year in range(2017, 2021)]
+        datasets = [dask.delayed(feather.read_dataframe)(f"statcast_data/{year}", columns=columns) for year in range(2017, 2021)]
         meta = self.get_data_types(df=dd.from_delayed(datasets[0]))
-        df = dd.from_delayed(datasets, meta=meta)
+        df = dd.from_delayed(datasets, meta=meta).repartition(npartitions=npartitions)
         df.set_index("index")
         return df
 
-    def load_season(self, season):
+    def load_season(self, season, columns=None, npartitions=8):
         """ Loads a single season from the statcast_data folder
         
         Parameters
         ----------
         season (int, str) : the season to load
 
+        columns (list, default=None) : columns to read. If None, all columns are read
+
+        npartitions(int, default=8) : the number of pandas DataFrames to split the Dask DataFrame into
+
         Returns
         --------
         DataFrame : the data from the specified season
         """
-        df = [dask.delayed(feather.read_dataframe)(f"statcast_data/{season}")]
-        # meta = self.get_data_types(df=dd.from_delayed(df))
-        # df = dd.from_delayed(df, meta=meta)
-        df = dd.from_delayed(df)
+        df = [dask.delayed(feather.read_dataframe)(f"statcast_data/{season}", columns=columns)]
+        meta = self.get_data_types(df=dd.from_delayed(df))
+        df = dd.from_delayed(df, meta=meta).repartition(npartitions=npartitions)
         df.set_index("index")
         return df
 
