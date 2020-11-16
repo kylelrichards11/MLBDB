@@ -12,6 +12,8 @@ class DataHandler():
             "appearance_gap_batter": "i4",
             "appearance_gap_pitcher": "i4",
             "at_bat_number": "i8",
+            "at_bat_count_pitcher": "i8",
+            "at_bat_count_batter": "i8",
             "away_score": "Int8",
             "away_team": "str",
             "ax": "float",
@@ -186,3 +188,21 @@ class DataHandler():
                     temp = df.loc[:, col]
                     temp.to_csv(f'error_{col}.csv')
             exit()
+
+    def set_index(self, df, index_col):
+        """ Sets the index of the given DataFrame to the specified column. The column is not deleted and the index is named to pitch_id 
+        
+        Parameters
+        ----------
+        df (DataFrame) : the DataFrame to set the index for
+
+        index_col (str) : the name of the column in the DataFrame to use as the new index
+
+        Returns
+        -------
+        DataFrame : the input DataFrame with the index set
+        """
+        df = df.rename(columns={"index":"pitch_id"})
+        df = df.set_index("pitch_id", drop=False)
+        df = df.rename(columns={"pitch_id":"index"})
+        return df

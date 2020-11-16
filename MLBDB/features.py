@@ -1,14 +1,13 @@
 from datetime import datetime
-import gc
+import time
 
 import dask.dataframe as dd
 from dask.distributed import Client, progress
 import numpy as np
 import pandas as pd
-import pandas
 
 from data import DataHandler
-import sys
+from utils import print_time
 
 ########################################################################################################################
 ## FEATURE MAKER
@@ -80,7 +79,8 @@ class FeatureMaker():
         data_temp = data.loc[:, ["game_date", "game_pk", player_type]]
         meta = self._dh.get_data_types(df=data_temp, extra_cols=[f"appearance_gap_{player_type}"])
         gaps = data_temp.groupby(player_type).apply(calc_gap, player_type, meta=meta).reset_index(drop=True).drop(columns=["game_date"])
-        return data.merge(gaps)
+        data = data.merge(gaps)
+        return self._dh.set_index(data, "index")
 
     def at_bat_count(self, data, player_type):
         """ Calculates the number of at bats the player has had during the game and adds it as a feature 
@@ -95,8 +95,20 @@ class FeatureMaker():
         -------
         DataFrame : the dataset with the feature at_bat_count_pitcher or at_bat_count_batter
         """
+
+        def count(df, col_name):
+            df_temp = df.loc[:, ["index", "at_bat_number"]]
+            df_temp = df_temp.sort_index()
+            ab_nums = df_temp.drop_duplicates(subset=["at_bat_number"]).reset_index(drop=True)
+            ab_counts = pd.concat((ab_nums, pd.Series(np.arange(0, ab_nums.shape[0]), name=col_name)), axis=1)
+            data = df_temp.merge(ab_counts, left_on="at_bat_number", right_on="at_bat_number").drop(columns="index_y").rename(columns={"index_x":"index"})
+            return data.loc[:, ["index", col_name]]
+
         assert(player_type == "pitcher" or player_type == "batter")
-        #TODO: Finish function
+        meta = self._dh.get_data_types(extra_cols=["index", f"at_bat_count_{player_type}"])
+        at_bat_counts = data.groupby([player_type, "game_pk"]).apply(count, f"at_bat_count_{player_type}", meta=meta)
+        data = data.merge(at_bat_counts)
+        return self._dh.set_index(data, "index")
     
     def pitch_count(self, data, player_type):
         """ Calculates the number of previous pitches seen by each player in each game and adds it as a feature
@@ -116,7 +128,8 @@ class FeatureMaker():
         pitch_counts = data.groupby([player_type, "game_pk"]).apply(
             self._create_event_order_col, f"pitch_count_{player_type}", "Int8", meta=meta
         )
-        return data.merge(pitch_counts)
+        data = data.merge(pitch_counts)
+        return self._dh.set_index(data, "index")
 
 if __name__ == "__main__":
     client = Client(n_workers=2, threads_per_worker=2, memory_limit='4GB')
@@ -160,12 +173,19 @@ if __name__ == "__main__":
         "type"
     ]
 
-    data = dh.load_all_seasons(columns=columns, npartitions=8)
-
+    # data = dh.load_all_seasons(columns=columns, npartitions=8)
+    data = dh.load_season(2020, columns=columns, npartitions=8)
+    print(data.shape)
+    stime = time.perf_counter()
+    data = fm.at_bat_count(data, "pitcher")
+    data = fm.at_bat_count(data, "batter")
     data = fm.pitch_count(data, "pitcher")
     data = fm.pitch_count(data, "batter")
     data = fm.appearance_gap(data, "pitcher")
     data = fm.appearance_gap(data, "batter")
-
-    data = data.head(100)
-    print(data)
+    data = data[data["pitcher"] == 453286]
+    data = data.set_index("index")
+    data = data.compute()
+    etime = time.perf_counter()
+    print_time(stime, etime)
+    data.to_csv("temp.csv")
