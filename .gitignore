@@ -11,5 +11,4 @@ MLBDB/statcast_data_old/
 MLBDB/statcast_data/2*
 temp.py
 temp.csv
-utils.py
 *.png
